@@ -655,3 +655,173 @@ uv run python langchain/10_mcp_client.py
 The `Authorization` header is sent with each Streamable HTTP request. Keep the token outside code and configuration
 files that may be committed. Use a tool-capable Ollama model; if the model does not make tool calls reliably, test
 tool discovery independently before changing agent prompts.
+
+## 10. Select relevant MCP tools before calling the model
+
+With ten MCP servers, do not discover and bind every tool for every request. A large tool list increases prompt size,
+cost, and the chance that a model chooses an unrelated capability. Instead, classify the request into an allowlisted
+intent, load tools only from the matching server connections, and bind just those tools to the model.
+
+```text
+user input → intent router → allowed server names → get_tools(server_name=...)
+           → small tool list + matching system prompt → model or agent
+```
+
+For example, an add request can load only the `adder` server and a multiplication request can load only the
+`multiplier` server:
+
+```python
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+from langchain_core.tools import BaseTool
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+
+def select_servers(user_input: str) -> tuple[str, ...]:
+    """Return the allowlisted MCP servers appropriate for one request."""
+    request = user_input.casefold()
+    if "add" in request or "plus" in request:
+        return ("adder",)
+    if "multiply" in request or "times" in request:
+        return ("multiplier",)
+    return ()
+
+
+def system_prompt_for(server_names: Sequence[str]) -> str:
+    """Describe only the capabilities intentionally available to this request."""
+    if server_names == ("adder",):
+        return "You handle addition. Use an available tool for arithmetic."
+    if server_names == ("multiplier",):
+        return "You handle multiplication. Use an available tool for arithmetic."
+    if server_names == ("adder", "multiplier"):
+        return "You handle addition and multiplication. Use only the available tools for arithmetic."
+    raise ValueError("No unambiguous MCP capability is available for this request.")
+
+
+async def tools_for_request(client: MultiServerMCPClient, user_input: str) -> tuple[list[BaseTool], str]:
+    """Load only tools from servers permitted by the classified request intent."""
+    server_names = select_servers(user_input)
+    if not server_names:
+        raise ValueError("Ask the user whether they need addition or multiplication.")
+
+    tools: list[BaseTool] = []
+    for server_name in server_names:
+        tools.extend(await client.get_tools(server_name=server_name))
+    return tools, system_prompt_for(server_names)
+```
+
+Use `tools_for_request()` before creating the agent:
+
+```python
+question = "What is 21 plus 2?"
+tools, system_prompt = await tools_for_request(client, question)
+agent = create_agent(model=ChatOllama(model="llama3.2:3b", temperature=0), tools=tools, system_prompt=system_prompt)
+result = await agent.ainvoke({"messages": [{"role": "user", "content": question}]})
+```
+
+The router is an authorization and scope decision, not a model convenience. Keep its mapping in trusted application
+code, validate its output against known server names, and return a clarification request when intent is ambiguous.
+For a request that genuinely needs more than one capability, explicitly return both allowed names, for example
+`("adder", "multiplier")`; do not silently fall back to all ten servers.
+
+## 11. Classify MCP intent with an LLM and validate the result
+
+For a larger MCP catalogue, a small string-matching router becomes difficult to maintain. You can use an LLM to
+categorize the request from a concise, trusted list of server capabilities. Do **not** let the LLM invent server names
+or make authorization decisions: validate its structured result before discovering any tools.
+
+```text
+user input + trusted MCP catalogue → LLM structured classification → allowlist validation
+→ selected server names → get_tools(server_name=...) → focused agent
+```
+
+```python
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.tools import BaseTool
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_ollama import ChatOllama
+from pydantic import BaseModel, Field
+
+
+SERVER_CATALOG: dict[str, str] = {
+    "adder": "Adds two numbers.",
+    "multiplier": "Multiplies two numbers.",
+    # Add the remaining trusted server names and one short capability description here.
+}
+
+
+class MCPSelection(BaseModel):
+    """LLM-proposed MCP server scope for one user request."""
+
+    server_names: list[str] = Field(max_length=2, description="Names selected only from the supplied catalogue")
+    needs_clarification: bool = Field(description="True when no safe server subset can be selected")
+    clarification_question: str | None = Field(default=None, description="Question to ask when clarification is needed")
+
+
+def validate_selection(selection: MCPSelection, allowed_names: Sequence[str]) -> tuple[str, ...]:
+    """Return an allowlisted, de-duplicated server selection or raise a safe error."""
+    selected = tuple(dict.fromkeys(selection.server_names))
+    unknown_names = set(selected).difference(allowed_names)
+    if unknown_names:
+        raise ValueError(f"Classifier returned unknown MCP servers: {sorted(unknown_names)}")
+    if selection.needs_clarification or not selected:
+        question = selection.clarification_question or "Which capability do you need?"
+        raise ValueError(question)
+    return selected
+
+
+async def tools_for_llm_classified_request(
+    client: MultiServerMCPClient, user_input: str
+) -> tuple[list[BaseTool], str]:
+    """Classify a request, validate its scope, and load tools only from selected servers."""
+    catalogue = "\n".join(f"- {name}: {description}" for name, description in SERVER_CATALOG.items())
+    classifier = ChatOllama(model="llama3.2:3b", temperature=0).with_structured_output(MCPSelection)
+    result = classifier.invoke(
+        [
+            SystemMessage(
+                content=(
+                    "Choose zero, one, or two MCP server names only from this catalogue. "
+                    "Set needs_clarification=true when the request is ambiguous or unsupported.\n\n"
+                    f"Available MCP servers:\n{catalogue}"
+                )
+            ),
+            HumanMessage(content=user_input),
+        ]
+    )
+    if not isinstance(result, MCPSelection):
+        raise TypeError("Classifier did not return the requested MCPSelection schema.")
+
+    selected_names = validate_selection(result, tuple(SERVER_CATALOG))
+    tools: list[BaseTool] = []
+    for server_name in selected_names:
+        tools.extend(await client.get_tools(server_name=server_name))
+    system_prompt = f"Use only the selected MCP capabilities: {', '.join(selected_names)}."
+    return tools, system_prompt
+```
+
+The capability catalogue is intentionally short: the classifier needs server names and business-level descriptions,
+not every JSON schema for every tool. The downstream agent receives only the tools returned for `selected_names`. Log
+the selected names and the classifier version, but do not log tokens, authorization headers, or sensitive user input.
+
+### Requests that need more than one MCP server
+
+Yes—combined requests are supported. For `"Add 2 and 3, then multiply the result by 4"`, the classifier should return:
+
+```json
+{
+  "server_names": ["adder", "multiplier"],
+  "needs_clarification": false,
+  "clarification_question": null
+}
+```
+
+`validate_selection()` accepts both allowlisted names, and the loop in `tools_for_llm_classified_request()` loads tools
+from both servers. The resulting agent sees only the addition and multiplication tools, then can call them in the
+required order. Keep `max_length=2` only when two servers is your intended maximum; raise it deliberately if a valid
+workflow needs more services.

@@ -151,6 +151,21 @@ uv run python client.py
 The result should represent `5.0`. To verify authentication safely, run the command from a new shell without setting
 `MCP_AUTH_TOKEN`; it should fail before revealing available tools.
 
+### Call with curl
+
+The repository also includes [`mcp/call_with_curl.sh`](../mcp/call_with_curl.sh), which performs the required MCP
+initialization request and then sends the tool-call payload from [`mcp/input.json`](../mcp/input.json). With the server
+running and `MCP_AUTH_TOKEN` set in a clean terminal, run:
+
+```bash
+cd mcp
+chmod +x call_with_curl.sh
+./call_with_curl.sh
+```
+
+To call another tool, change only `input.json`; keep it as a JSON-RPC `tools/call` request. You can pass a different
+JSON file as the first argument, or set `MCP_SERVER_URL` to use a different local endpoint.
+
 ## 6. Production authentication
 
 Do not expose this static-token version outside local development. A production server should terminate TLS, validate

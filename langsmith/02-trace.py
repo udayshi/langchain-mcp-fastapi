@@ -1,4 +1,4 @@
-"""Create and stream a simple LCEL chain."""
+"""Trace a local Ollama LangChain call with LangSmith."""
 
 from __future__ import annotations
 
@@ -8,13 +8,11 @@ from langchain_ollama import ChatOllama
 
 
 def main() -> None:
-    """Stream a one-sentence summary."""
-    prompt = ChatPromptTemplate.from_template("Summarise this text in one sentence:\n\n{text}")
+    """Invoke a traced LangChain chain."""
+    prompt = ChatPromptTemplate.from_template("Answer in one sentence: {question}")
     model = ChatOllama(model="llama3.2:3b", temperature=0)
     chain = prompt | model | StrOutputParser()
-    for chunk in chain.stream({"text": "LangChain standardises LLM application components."}):
-        print(chunk, end="", flush=True)
-    print()
+    print(chain.invoke({"question": "What is a Python tuple?"}))
 
 
 if __name__ == "__main__":
