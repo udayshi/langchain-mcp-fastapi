@@ -4,18 +4,25 @@ This repository is a hands-on path for building reliable local LLM applications 
 LangChain, LangGraph, LangSmith, and MCP. Each guide progresses from a small runnable example to the practices that
 make an application testable, observable, and safe to operate.
 
+## Why I created this project
+
+I created this project to build practical, reproducible experience with local models, workflow orchestration,
+testing, observability, evaluation, and secure tool access.
+
+Contractual obligations prevent me from disclosing development URLs or proprietary workplace code.
+
 ## Why learn these topics?
 
 Learning only how to call a model is not enough to build a dependable application. The guides are arranged so that
 each one solves a different practical problem:
 
-| Guide | Why it matters | What you will learn |
-| --- | --- | --- |
-| [LangChain](docs/langchain.md) | A model call needs clear prompts, validated outputs, retrieval, and carefully bounded tools. | Chat, prompt templates, chains, structured output, RAG, agents, conversation state, health checks, and MCP tool selection. |
-| [LangChain TDD](docs/langchain-tdd.md) | Model calls are slow and variable; core application logic should still be fast and reliable to test. | RED–GREEN–REFACTOR, fake models, offline unit tests, Pydantic validation, and opt-in live tests. |
-| [LangGraph](docs/langgraph.md) | Real workflows have state, branches, retries, tools, and human decisions that a linear chain cannot express clearly. | Typed state, routing, controlled LLM nodes, tool loops, persistence, human approval, and MCP workflows. |
-| [LangSmith](docs/langsmith.md) | A final answer alone cannot explain a bad result or prove a change made an application better. | Traces, debugging, feedback, datasets, evaluations, and a release-quality feedback loop. |
-| [MCP](docs/mcp.md) | Models need narrow, authenticated access to external capabilities rather than unrestricted system access. | A loopback-only, token-protected MCP server, client verification, and production authentication concerns. |
+| Guide | Why it matters |
+| --- | --- |
+| [LangChain](docs/langchain.md) | A model call needs clear prompts, validated outputs, retrieval, and carefully bounded tools. |
+| [LangChain TDD](docs/langchain-tdd.md) | Model calls are slow and variable; core application logic should still be fast and reliable to test. |
+| [LangGraph](docs/langgraph.md) | Real workflows have state, branches, retries, tools, and human decisions that a linear chain cannot express clearly. |
+| [LangSmith](docs/langsmith.md) | A final answer alone cannot explain a bad result or prove a change made an application better. |
+| [MCP](docs/mcp.md) | Models need narrow, authenticated access to external capabilities rather than unrestricted system access. |
 
 Together, the learning path moves from **one local model call** to a **tested, stateful, observable application with
 secure tools**.
@@ -144,14 +151,3 @@ uv run python mcp/server.py
 export MCP_AUTH_TOKEN="the-same-token"
 uv run python mcp/client.py
 ```
-
-The server is intentionally bound to `127.0.0.1`; do not expose the development static-token implementation to a
-network.
-
-## Documentation
-
-- [LangChain: basic to advanced](docs/langchain.md)
-- [LangChain: test-driven development](docs/langchain-tdd.md)
-- [LangGraph: basic to advanced](docs/langgraph.md)
-- [LangSmith: tracing and evaluation](docs/langsmith.md)
-- [MCP: token-protected server](docs/mcp.md)
